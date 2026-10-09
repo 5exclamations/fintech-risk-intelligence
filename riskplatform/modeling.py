@@ -32,10 +32,11 @@ def load_reference(engine: Engine) -> dict[str, pd.DataFrame]:
         return {t: pd.read_sql_query(text(f"SELECT * FROM {t}"), con) for t in REF_TABLES}
 
 
-def make_dataset(engine: Engine, split: SplitConfig = SPLIT) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+def make_dataset(engine: Engine, split: SplitConfig = SPLIT, tx: pd.DataFrame | None = None) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Features + metadata for every transaction. The ``synthetic_truth`` tables are deliberately NOT read here."""
-    with engine.connect() as con:
-        tx = pd.read_sql_query(text("SELECT * FROM transactions ORDER BY ts_epoch, txn_id"), con)
+    if tx is None:  # ``tx`` override exists so tests can perturb labels / rows without touching the database
+        with engine.connect() as con:
+            tx = pd.read_sql_query(text("SELECT * FROM transactions ORDER BY ts_epoch, txn_id"), con)
     refs = load_reference(engine)
     feats = build_features(tx, refs["customers"], refs["accounts"], refs["merchants"], refs["locations"], split.label_delay_days)
     epoch0 = (tx.ts_epoch.min() // 86400) * 86400

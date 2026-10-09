@@ -14,7 +14,7 @@ test:
 lint:
 	.venv/bin/ruff check .
 api:
-	.venv/bin/uvicorn riskplatform.api:app --port 8000
+	RISK_API_KEY=$${RISK_API_KEY:-dev-demo-key} .venv/bin/uvicorn riskplatform.api:app --port 8000
 dashboard:
 	.venv/bin/streamlit run dashboard/app.py
 screenshots:   ## needs: pip install playwright + Google Chrome; dashboard running on :8501

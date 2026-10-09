@@ -24,6 +24,8 @@ Demonstration of methodology: time-safe feature engineering, evaluation, cost-ba
 Real credit, lending, or account-closure decisions; any use without re-training on real data and independent validation; automated decline without human appeal path.
 
 ## Known limitations
+**Poor recall on unseen fraud patterns: 21% on the post-drift `gift_card_cashout` typology — see [limitations.md](limitations.md). Not a production decision system.**
+
 * The simulator defines the signal: velocity, device and geography effects are far cleaner than in reality. Expect real PR-AUC to be lower and thresholds to differ.
 * Hand-set cost assumptions drive the operating point.
 * Label noise is modelled coarsely; real chargeback delays vary by network and reason code.

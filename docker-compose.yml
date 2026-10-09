@@ -3,6 +3,7 @@ x-app: &app
   build: .
   environment:
     DATABASE_URL: postgresql+psycopg://risk:risk@db:5432/risk
+    RISK_API_KEY: ${RISK_API_KEY:-change-me-demo-key}   # override: RISK_API_KEY=... docker compose up
   volumes:
     - artifacts:/app/artifacts
 
@@ -10,7 +11,7 @@ services:
   db:
     image: postgres:16
     environment: { POSTGRES_USER: risk, POSTGRES_PASSWORD: risk, POSTGRES_DB: risk }
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U risk -d risk"]
@@ -25,13 +26,13 @@ services:
 
   api:
     <<: *app
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     depends_on: { pipeline: { condition: service_completed_successfully } }
 
   dashboard:
     <<: *app
     command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
-    ports: ["8501:8501"]
+    ports: ["127.0.0.1:8501:8501"]
     depends_on: { pipeline: { condition: service_completed_successfully } }
 
 volumes:

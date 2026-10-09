@@ -5,12 +5,14 @@ from fastapi.testclient import TestClient
 from riskplatform.api import create_app
 from riskplatform.modeling import make_dataset, train_all
 
+KEY = "test-key-123"
+
 
 @pytest.fixture(scope="module")
 def client_and_data(engine):
     data, _ = make_dataset(engine, SMALL_SPLIT)
     model, ev, _ = train_all(data, SMALL_SPLIT, seed=1)
-    with TestClient(create_app(engine, model)) as c:
+    with TestClient(create_app(engine, model, api_key=KEY), headers={"X-API-Key": KEY}) as c:
         yield c, ev
 
 
@@ -55,3 +57,45 @@ def test_model_endpoint(client_and_data):
     c, _ = client_and_data
     m = c.get("/model").json()
     assert m["synthetic_data"] is True and "thresholds" in m
+
+
+# ----------------------------------------------------------------------------- security
+def test_requires_api_key_but_health_is_open(client_and_data):
+    c, ev = client_and_data
+    anon = TestClient(c.app)  # no default header, lifespan not started: auth must fail before any handler runs
+    tid = ev.txn_id.iloc[0]
+    assert anon.get("/health").status_code == 200
+    for method, url in [("get", f"/score/{tid}"), ("get", "/model"), ("get", "/monitoring")]:
+        assert getattr(anon, method)(url).status_code == 401
+    assert anon.post("/score", json={}).status_code in (401, 422)
+    assert anon.get(f"/score/{tid}", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert c.get(f"/score/{tid}").status_code == 200
+
+
+def test_security_headers_and_demo_notice(client_and_data):
+    c, _ = client_and_data
+    r = c.get("/health")
+    assert "synthetic" in r.headers["x-demo-notice"] and r.headers["cache-control"] == "no-store"
+
+
+def test_input_validation_rejects_injection_and_nan(client_and_data):
+    c, _ = client_and_data
+    body = {"customer_id": "C00001", "account_id": "A000002", "merchant_id": "M00001", "location_id": 1, "amount": 5.0, "channel": "online"}
+    assert c.post("/score", json={**body, "customer_id": "C1'; DROP TABLE x;--"}).status_code == 422
+    assert c.post("/score", json={**body, "amount": 1e12}).status_code == 422
+    assert c.post("/score", json={**body, "channel": "wire"}).status_code == 422
+
+
+def test_rate_limit(client_and_data, engine):
+    c, ev = client_and_data
+    tid = ev.txn_id.iloc[0]
+    with TestClient(create_app(engine, c.app.state.scorer.model, api_key=KEY, rate_limit_per_min=3), headers={"X-API-Key": KEY}) as lim:
+        codes = [lim.get(f"/score/{tid}").status_code for _ in range(5)]
+    assert codes == [200, 200, 200, 429, 429]
+
+
+def test_fails_closed_without_key(monkeypatch):
+    monkeypatch.delenv("RISK_API_KEY", raising=False)
+    monkeypatch.delenv("RISK_API_AUTH", raising=False)
+    with pytest.raises(RuntimeError):
+        create_app()

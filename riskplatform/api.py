@@ -9,13 +9,18 @@ GET  /health
 from __future__ import annotations
 
 import json
+import os
+import secrets
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Literal
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -26,17 +31,19 @@ from .features import build_features
 from .modeling import RiskModel, load_reference
 from .rules import RULE_INDEX, evaluate_rules, rule_score
 
-SYNTHETIC_NOTICE = "Model trained on synthetic data; scores illustrate the method and are not validated on real transactions."
+SYNTHETIC_NOTICE = ("DEMONSTRATION ONLY: model trained on synthetic data; scores illustrate the method, are not validated on real "
+                    "transactions and must not be used for real fraud, credit or account decisions.")
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 class TransactionIn(BaseModel):
-    customer_id: str
-    account_id: str
-    merchant_id: str
+    customer_id: str = Field(max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
+    account_id: str = Field(max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
+    merchant_id: str = Field(max_length=16, pattern=r"^[A-Za-z0-9_-]+$")
     location_id: int = Field(description="Where the transaction happens (POS city or IP-geolocated city)")
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, lt=1e7, allow_inf_nan=False)
     channel: Literal["card_present", "online", "atm"]
-    device_id: str | None = None
+    device_id: str | None = Field(default=None, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
     ts: datetime | None = Field(default=None, description="UTC timestamp; defaults to now")
 
 
@@ -116,7 +123,29 @@ class Scorer:
         return out
 
 
-def create_app(engine=None, model: RiskModel | None = None) -> FastAPI:
+def create_app(engine=None, model: RiskModel | None = None, api_key: str | None = None,
+               rate_limit_per_min: int | None = None) -> FastAPI:
+    """Security model (demo-grade, see docs/api_security.md): API-key header required on every endpoint except /health,
+    fail-closed at startup if no key is configured (explicit opt-out: RISK_API_AUTH=disabled for local experiments),
+    constant-time key comparison, strict input validation, and a per-client sliding-window rate limit."""
+    key = api_key or os.environ.get("RISK_API_KEY")
+    auth_disabled = os.environ.get("RISK_API_AUTH", "").lower() == "disabled"
+    if not key and not auth_disabled:
+        raise RuntimeError("Set RISK_API_KEY (or RISK_API_AUTH=disabled for a throw-away local demo); refusing to start an open scoring API.")
+    limit = rate_limit_per_min or int(os.environ.get("RISK_API_RATE_LIMIT", "120"))
+    hits: dict[str, deque] = defaultdict(deque)
+
+    def guard(request: Request, supplied: str | None = Depends(_api_key_header)):
+        if not auth_disabled and not (supplied and secrets.compare_digest(supplied.encode(), key.encode())):
+            raise HTTPException(401, "missing or invalid X-API-Key", headers={"WWW-Authenticate": "ApiKey"})
+        client = (supplied or "") + "|" + (request.client.host if request.client else "?")
+        q, now = hits[client], time.monotonic()
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) >= limit:
+            raise HTTPException(429, "rate limit exceeded", headers={"Retry-After": "60"})
+        q.append(now)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         eng = engine or get_engine()
@@ -124,33 +153,41 @@ def create_app(engine=None, model: RiskModel | None = None) -> FastAPI:
         app.state.scorer = Scorer(eng, mdl)
         yield
 
-    app = FastAPI(title="Transaction Risk Scoring API (synthetic data)", version="1.0.0", lifespan=lifespan,
-                  description=SYNTHETIC_NOTICE)
+    app = FastAPI(title="Transaction Risk Scoring API - SYNTHETIC-DATA DEMO, NOT FOR PRODUCTION DECISIONS", version="1.0.0",
+                  lifespan=lifespan, description=SYNTHETIC_NOTICE, docs_url="/docs", redoc_url=None)
+
+    @app.middleware("http")
+    async def demo_headers(request: Request, call_next):
+        resp = await call_next(request)
+        resp.headers["X-Demo-Notice"] = "synthetic-data-demo; not-a-production-fraud-decision-system"
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     @app.get("/health")
     def health(request: Request):
         return {"status": "ok", "model_version": request.app.state.scorer.model.meta["model_version"]}
 
-    @app.post("/score", response_model=ScoreOut)
+    @app.post("/score", response_model=ScoreOut, dependencies=[Depends(guard)])
     def score(t: TransactionIn, request: Request):
         try:
             return request.app.state.scorer.score_new(t)
         except KeyError as e:
             raise HTTPException(422, str(e))
 
-    @app.get("/score/{txn_id}")
+    @app.get("/score/{txn_id}", dependencies=[Depends(guard)])
     def replay(txn_id: str, request: Request):
         try:
             return request.app.state.scorer.replay(txn_id)
         except KeyError:
             raise HTTPException(404, f"unknown txn_id {txn_id}")
 
-    @app.get("/model")
+    @app.get("/model", dependencies=[Depends(guard)])
     def model_info(request: Request):
         m = request.app.state.scorer.model
         return {**m.meta, "thresholds": m.thresholds, "features": m.features, "algorithm_name": m.name}
 
-    @app.get("/monitoring")
+    @app.get("/monitoring", dependencies=[Depends(guard)])
     def monitoring():
         p = ARTIFACT_DIR / "monitoring" / "summary.json"
         if not p.exists():
