@@ -1,5 +1,7 @@
 # Financial Transaction Risk Intelligence Platform
 
+[![ci](https://github.com/5exclamations/fintech-risk-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/5exclamations/fintech-risk-intelligence/actions/workflows/ci.yml)
+
 End-to-end reference implementation: synthetic transaction data → PostgreSQL/SQL analytics → leakage-safe feature engineering →
 rules + statistical + ML fraud detection → rigorous time-based evaluation with business-cost analysis → explainable risk-scoring API →
 Streamlit dashboard → drift/performance monitoring. Python · PostgreSQL · SQL · pandas · NumPy · scikit-learn · FastAPI · Streamlit · Docker · pytest · GitHub Actions.
@@ -22,6 +24,11 @@ The test window includes a fraud pattern the model never saw: recall on it is on
 Full discussion: [modeling methodology](docs/modeling_methodology.md), [model card](docs/model_card.md).
 
 ![dashboard](docs/screenshots/05_model_performance.png)
+
+## Architecture
+![Architecture: synthetic generator, PostgreSQL/SQLite, SQL analytics, point-in-time features, detectors, time-split evaluation, FastAPI scoring, monitoring and dashboard](docs/architecture.png)
+
+Details: [docs/architecture.md](docs/architecture.md).
 
 ## Quick start
 ```bash
