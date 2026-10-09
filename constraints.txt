@@ -1,0 +1,18 @@
+# Versions the Windows/Python 3.12 verification run used (docs/verification.md). Use: pip install -r requirements-dev.txt -c constraints.txt
+fastapi==0.143.0
+httpx2==2.13.1
+joblib==1.6.0
+numpy==2.5.3
+pandas==3.0.6
+plotly==7.1.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pyarrow==25.0.1
+pydantic==2.14.0
+pytest==9.1.1
+ruff==0.16.10
+scikit-learn==1.9.1
+SQLAlchemy==2.1.4
+starlette==1.7.0
+streamlit==1.65.0
+uvicorn==0.54.0

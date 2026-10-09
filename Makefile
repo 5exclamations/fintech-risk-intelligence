@@ -1,6 +1,6 @@
-PY ?= .venv/bin/python
+PY ?= .venv/bin/python   # Windows: use scripts/dev.ps1
 
-.PHONY: setup data train all test lint api dashboard screenshots docker
+.PHONY: setup data train backtest all test lint api dashboard screenshots docker
 setup:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 all:           ## generate -> load -> SQL analytics -> train/evaluate -> monitor (SQLite unless DATABASE_URL is set)

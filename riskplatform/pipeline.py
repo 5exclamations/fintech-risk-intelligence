@@ -16,9 +16,11 @@ from .db import get_engine, load_tables
 from .evaluation import at_budget, block_bootstrap_pr_auc, business_cost, confusion, false_positive_analysis, ranking_metrics, workload
 from .explain import group_contributions, model_reasons
 from .generate import generate
+from .manifest import build_manifest
 from .modeling import make_dataset, train_all
 from .monitoring import summarize, windowed
 from .rules import RULE_INDEX
+from .slices import slice_report
 
 DISCLAIMER = ("ALL RESULTS ARE FROM SYNTHETIC DATA generated with documented, invented fraud typologies. "
               "They demonstrate the methodology, not real-world performance.")
@@ -119,8 +121,16 @@ def step_train_evaluate(engine, split: SplitConfig = SPLIT, out_dir: Path | None
         "synthetic_only_diagnostics": {"recall_by_true_pattern": by_pattern, "share_of_false_positives_that_are_undiscovered_fraud": fp_truly_fraud,
                                        "note": "uses generator ground truth; impossible in real life"},
         "calibration": _calibration(test),
+        "calibration_summary": _calibration_summary(y, p),
+        "slice_performance": slice_report(test.assign(history=pd.cut(test.cust_prior_n.fillna(0), [-1, 9, 49, 1e9],
+                                                                     labels=["new (<10)", "established (10-49)", "mature (50+)"]).astype(str)),
+                                          alert, ["segment", "channel", "category", "amount_bucket", "history"]),
     }
     _dump(metrics, out / "metrics.json")
+    gbm = metrics["methods_test"]["Gradient boosting (calibrated)"]
+    _dump(build_manifest(data[["txn_id", "customer_id", "merchant_id", "account_id", "ts_epoch", "channel", "amount", "is_fraud"]], seed,
+                         {"pr_auc": gbm["pr_auc"], "precision": cm["precision"], "recall": cm["recall"], "synthetic": True}),
+          out / "run_manifest.json")
 
     # --- monitoring: reference = training sample; windows over validation + test
     p_ref = model.predict(model.reference)
@@ -154,9 +164,26 @@ def _calibration(test: pd.DataFrame, bins: int = 8) -> list[dict]:
     return g.reset_index(drop=True).round(5).to_dict("records")
 
 
+def _calibration_summary(y, p, bins: int = 10) -> dict:
+    """Brier score and (quantile-bin) expected calibration error; base-rate shift between valid and test inflates both."""
+    y, p = np.asarray(y, float), np.asarray(p, float)
+    q = pd.qcut(pd.Series(p).rank(method="first"), bins, labels=False)
+    g = pd.DataFrame({"y": y, "p": p, "q": q.values}).groupby("q").agg(y=("y", "mean"), p=("p", "mean"), n=("y", "size"))
+    return {"brier": float(np.mean((p - y) ** 2)), "brier_baseline_constant": float(np.mean((y.mean() - y) ** 2)),
+            "ece": float((g.n * (g.y - g.p).abs()).sum() / g.n.sum()), "mean_predicted": float(p.mean()), "observed_rate": float(y.mean())}
+
+
+def step_backtest(engine, split: SplitConfig = SPLIT, out_dir: Path | None = None, seed: int = 42, **kw) -> dict:
+    from .backtest import run_backtest
+    data, _ = make_dataset(engine, split)
+    res = run_backtest(data, split, seed=seed, **kw)
+    _dump(res, (out_dir or ARTIFACT_DIR) / "backtest.json")
+    return res
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Financial Transaction Risk Intelligence Platform pipeline (synthetic data)")
-    ap.add_argument("step", choices=["generate", "analytics", "train", "all"])
+    ap.add_argument("step", choices=["generate", "analytics", "train", "backtest", "all"])
     ap.add_argument("--customers", type=int, default=GEN.n_customers)
     ap.add_argument("--seed", type=int, default=GEN.seed)
     a = ap.parse_args(argv)
@@ -166,6 +193,9 @@ def main(argv=None):
         print("generated rows:", step_generate(engine, gen))
     if a.step in ("analytics", "all"):
         r = step_analytics(engine); print("analytics queries:", ", ".join(r))
+    if a.step == "backtest":
+        r = step_backtest(engine, SPLIT, seed=a.seed)
+        print("[SYNTHETIC] rolling-origin backtest:", {k: round(v["mean"], 3) for k, v in r["summary"].items()}, "folds:", r["n_folds"])
     if a.step in ("train", "all"):
         m = step_train_evaluate(engine, SPLIT, seed=a.seed)
         op = m["test_operating_point"]
