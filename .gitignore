@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+data/
+artifacts/
+*.db
+.env
+.env.*
+*.pem
+*.key
+*.log
+.DS_Store
+*.joblib
+*.parquet
+.venv*/

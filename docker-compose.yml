@@ -1,0 +1,39 @@
+# docker compose up --build      -> Postgres, one-shot pipeline (generate -> load -> SQL analytics -> train -> monitor), API, dashboard
+x-app: &app
+  build: .
+  environment:
+    DATABASE_URL: postgresql+psycopg://risk:risk@db:5432/risk
+  volumes:
+    - artifacts:/app/artifacts
+
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_USER: risk, POSTGRES_PASSWORD: risk, POSTGRES_DB: risk }
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risk -d risk"]
+      interval: 3s
+      retries: 20
+
+  pipeline:
+    <<: *app
+    command: python -m riskplatform.pipeline all
+    depends_on: { db: { condition: service_healthy } }
+    restart: "no"
+
+  api:
+    <<: *app
+    ports: ["8000:8000"]
+    depends_on: { pipeline: { condition: service_completed_successfully } }
+
+  dashboard:
+    <<: *app
+    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    ports: ["8501:8501"]
+    depends_on: { pipeline: { condition: service_completed_successfully } }
+
+volumes:
+  pgdata:
+  artifacts:
