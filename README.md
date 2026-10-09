@@ -51,7 +51,7 @@ curl -X POST localhost:8000/score -H 'X-API-Key: dev-demo-key' -H 'content-type:
 | `dashboard/app.py` | Streamlit dashboard (9 tabs; interactive threshold & cost sliders) |
 | `tests/` | feature leakage, time-split, SQL, evaluation maths, PSI, API parity tests |
 | `.github/workflows/ci.yml` | ruff, pytest (SQLite + Postgres service), pipeline smoke run |
-| `docs/` | [limitations](docs/limitations.md) · [API security](docs/api_security.md) · [business case](docs/business_case.md) · [data dictionary](docs/data_dictionary.md) · [synthetic assumptions](docs/synthetic_data_assumptions.md) · [SQL examples](docs/sql_examples.md) · [methodology](docs/modeling_methodology.md) · [model card](docs/model_card.md) · [risk scoring](docs/risk_scoring.md) · [monitoring](docs/monitoring.md) · [architecture](docs/architecture.md) · [screenshots](docs/screenshots) |
+| `docs/` | [limitations](docs/limitations.md) · [API security](docs/api_security.md) · [business case](docs/business_case.md) · [data dictionary](docs/data_dictionary.md) · [synthetic assumptions](docs/synthetic_data_assumptions.md) · [SQL examples](docs/sql_examples.md) · [methodology](docs/modeling_methodology.md) · [model card](docs/model_card.md) · [risk scoring](docs/risk_scoring.md) · [monitoring](docs/monitoring.md) · [architecture](docs/architecture.md) · [screenshots](docs/screenshots) · [verification status](docs/verification.md) |
 
 ## Design highlights
 * **Leakage control is tested, not asserted**: truncating/shuffling the table must not change any earlier row's features; labels are used only after a 14-day maturity delay; splits leave maturity gaps; the generator's ground truth lives in separate tables.
